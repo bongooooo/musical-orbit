@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Selene Office — 3D World</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#080d15;color:#edf4fb;font:14px system-ui;overflow:hidden}
+#scene{position:fixed;inset:0}
+canvas{display:block}
+.panel{position:fixed;background:#0b111ce8;border:1px solid #45607788;
+border-radius:12px;padding:12px;backdrop-filter:blur(10px)}
+#brand{top:12px;left:12px}
+#controls{top:12px;left:50%;transform:translateX(-50%);display:flex;gap:6px}
+#rooms{right:12px;top:12px;width:190px}
+#help{bottom:12px;left:12px;color:#b6c7d8;font-size:11px}
+button{background:#203448;color:#edf4fb;border:1px solid #52758d;
+border-radius:7px;padding:8px;cursor:pointer}
+button.active{background:#35627d}
+#roomButtons button{display:block;width:100%;margin-top:6px;text-align:left}
+#chat{display:none;left:50%;bottom:12px;transform:translateX(-50%);
+width:min(500px,95vw);max-height:45vh}
+#log{white-space:pre-wrap;overflow:auto;max-height:180px;margin:10px 0}
+#chatrow{display:flex;gap:6px}
+textarea{flex:1;min-width:0;background:#101a27;color:white;border:1px solid #456077;
+border-radius:7px;padding:9px}
+#prompt{display:none;left:50%;top:54%;transform:translateX(-50%)}
+#toast{top:18%;left:50%;transform:translateX(-50%);display:none}
+@media(max-width:650px){#rooms{width:145px;right:5px;top:75px}
+#controls{top:auto;bottom:90px}#help{max-width:90vw}}
+</style>
+</head>
+<body>
+<div id="scene"></div>
+<div id="brand" class="panel"><b>SELENE OFFICE</b><br>
+<small>Shared 3D world</small></div>
+<div id="controls" class="panel">
+<button id="fps" class="active">FPS Walk</button>
+<button id="free">Freecam</button>
+<button id="auto">Autonomy: Off</button>
+</div>
+<div id="rooms" class="panel"><b>DESTINATIONS</b><div id="roomButtons"></div></div>
+<div id="help" class="panel">
+Click the world to capture mouse · WASD move · Mouse look · Space jump<br>
+Freecam: Space rise, Ctrl descend · E interact · Esc releases mouse
+</div>
+<div id="prompt" class="panel"></div>
+<div id="toast" class="panel"></div>
+<div id="chat" class="panel">
+<div><b id="chatTitle">Conversation</b>
+<button id="close" style="float:right">Close</button></div>
+<div id="log">You approached an inhabitant.</div>
+<div id="chatrow"><textarea id="message" rows="2"
+placeholder="Talk to them…"></textarea><button id="send">Send</button></div>
+<div id="status">Connecting through Flask</div>
+</div>
+
+<script type="module">
+import * as THREE from
+'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+const $=s=>document.querySelector(s);
+const sceneHost=$('#scene');
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x090e17);
+scene.fog=new THREE.Fog(0x090e17,45,140);
+const camera=new THREE.PerspectiveCamera(74,innerWidth/innerHeight,.1,250);
+camera.rotation.order='YXZ';
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+sceneHost.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xb5d8ee,0x171a24,1.8));
+const sun=new THREE.DirectionalLight(0xd4eaff,2);
+sun.position.set(-12,20,8);sun.castShadow=true;scene.add(sun);
+
+const materials={
+ floor:new THREE.MeshStandardMaterial({color:0x252e3a,roughness:.8}),
+ wall:new THREE.MeshStandardMaterial({color:0x364250,roughness:.8}),
+ dark:new THREE.MeshStandardMaterial({color:0x111925,metalness:.25,roughness:.4}),
+ slate:new THREE.MeshStandardMaterial({color:0x46505b,metalness:.25,roughness:.4}),
+ brass:new THREE.MeshStandardMaterial({color:0xc4aa7b,metalness:.7,roughness:.3}),
+ glow:new THREE.MeshStandardMaterial({color:0x9de9ff,emissive:0x3288a4,emissiveIntensity:1.5}),
+ sand:new THREE.MeshStandardMaterial({color:0x77756f,roughness:1}),
+ green:new THREE.MeshStandardMaterial({color:0x456b58})
+};
+const solids=[],objects=[],people=[];
+const raycaster=new THREE.Raycaster();
+const center=new THREE.Vector2(0,0);
+const keys={};
+const radius=.34,eyeHeight=1.68;
+let yaw=0,pitch=0,feet=0,vy=0,onGround=true;
+let mode='fps',locked=false,drag=false,lastX=0,lastY=0,dragMoved=false;
+let selected=null,autonomy=false,autonomyBusy=false;
+let moon,moonLight;
+
+const rooms=[
+{id:'atrium',name:'Central Atrium',x:0,z:0,w:24,d:24},
+{id:'vault',name:'Lunar Vault',x:-32,z:0,w:20,d:22},
+{id:'observatory',name:'Penumbra Observatory',x:32,z:0,w:22,d:22},
+{id:'silt',name:'Silt Atrium',x:0,z:-34,w:22,d:20},
+{id:'workshop',name:'Workshop',x:0,z:34,w:22,d:20},
+{id:'mezzanine',name:'Upper Mezzanine',x:6,z:-8,w:8,d:5}
+];
+
+function box(x,y,z,w,h,d,material,solid=true,label=''){
+ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);
+ m.position.set(x,y+h/2,z);m.castShadow=true;m.receiveShadow=true;
+ m.userData.label=label;scene.add(m);
+ if(solid)solids.push({minX:x-w/2,maxX:x+w/2,minY:y,maxY:y+h,
+ minZ:z-d/2,maxZ:z+d/2});
+ return m;
+}
+function cylinder(x,y,z,r,h,material,solid=true){
+ const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,16),material);
+ m.position.set(x,y+h/2,z);m.castShadow=true;scene.add(m);
+ if(solid)solids.push({minX:x-r,maxX:x+r,minY:y,maxY:y+h,
+ minZ:z-r,maxZ:z+r});
+ return m;
+}
+function interact(x,y,z,label,description){
+ const orb=new THREE.Mesh(new THREE.SphereGeometry(.13,14,12),materials.glow);
+ orb.position.set(x,y,z);scene.add(orb);
+ const ring=new THREE.Mesh(new THREE.TorusGeometry(.38,.025,8,24),materials.glow);
+ ring.position.set(x,.05,z);ring.rotation.x=Math.PI/2;scene.add(ring);
+ objects.push({x,y,z,label,description,orb,ring});
+}
+function room(r){
+ const m=r.id==='vault'?materials.dark:r.id==='silt'?materials.sand:materials.floor;
+ box(r.x,-.2,r.z,r.w,.4,r.d,m,false);
+ // Walls have doorway-sized gaps on the side facing the corridor.
+ box(r.x,0,r.z-r.d/2,r.w,4.5,.4,materials.wall);
+ box(r.x-r.w/2,0,r.z,.4,4.5,r.d,materials.wall);
+ box(r.x+r.w/2,0,r.z,.4,4.5,r.d,materials.wall);
+ box(r.x,0,r.z+r.d/2,r.w,4.5,.4,materials.wall);
+ for(let x=r.x-r.w/2+1;x<r.x+r.w/2;x+=2)
+ box(x,.01,r.z,.025,.01,r.d-.5,materials.dark,false);
+}
+rooms.filter(r=>r.id!=='mezzanine').forEach(room);
+
+// Corridor floors and side walls connect the five main rooms.
+function corridor(x,z,w,d){
+ box(x,-.2,z,w,.4,d,materials.dark,false);
+ box(x-w/2,0,z,.3,3,d,materials.wall);
+ box(x+w/2,0,z,.3,3,d,materials.wall);
+}
+corridor(-17,0,10,4);corridor(17,0,10,4);
+corridor(0,-18,4,12);corridor(0,18,4,12);
+
+// Workstations, chairs and displays.
+function desk(x,z,name){
+ box(x,.95,z,3,.18,1.4,materials.slate,true,name+' desk');
+ for(const dx of [-1.2,1.2])for(const dz of [-.5,.5])
+ box(x+dx,.05,z+dz,.12,.9,.12,materials.dark);
+ box(x,1.3,z-.35,1.45,.65,.12,materials.dark,false,name+' display');
+ box(x,1.32,z-.27,1.2,.42,.03,materials.glow,false);
+ box(x,.55,z+1.55,.85,.12,.8,materials.dark);
+ box(x,.9,z+1.9,.8,.65,.1,materials.dark);
+ interact(x,1.7,z-.3,name+' workstation','A workstation with recessed displays.');
+}
+desk(-5,-3,'ChatGPT');desk(5,-3,'Selene');desk(0,5,'Teo');
+
+// Mezzanine and visible stair treads. The controller follows the stair slope.
+for(let i=0;i<=9;i++){
+ const z=4-i;
+ box(8,i*.29,z,2.4,.29,1.08,materials.slate,false);
+ box(8,i*.29+.29,z-.05,2.4,.035,1,materials.brass,false);
+}
+box(6,2.6,-8,8,.35,5,materials.dark,false);
+interact(6,2.9,-8,'Upper Mezzanine','A raised observation platform reached by stairs.');
+
+// Lunar Vault shelving and canisters.
+for(const side of [-1,1])for(const z of [-7,-3,1,5,8]){
+ const x=-32+side*6;
+ box(x,0,z,3,3.5,1,materials.dark,true,'Archive shelf');
+ for(const y of [.6,1.5,2.4]){
+ box(x,y,z-.55,2.8,.08,.12,materials.brass,false);
+ for(let k=-1;k<=1;k++){
+ const can=cylinder(x+k*.8,y+.1,z,.16,.4,materials.brass,true);
+ can.rotation.z=Math.PI/2;
+ can.userData.label='Archive canister';
+ interact(x+k*.8,y+.4,z,'Archive canister','A physical archive container.');
+ }
+ }
+}
+interact(-32,1.5,0,'Archive index','The archive index plinth.');
+
+// Observatory dome and consoles.
+const dome=new THREE.Mesh(new THREE.SphereGeometry(8.2,32,20,0,Math.PI*2,0,Math.PI/2),
+new THREE.MeshStandardMaterial({color:0x70a9c3,transparent:true,opacity:.12,
+side:THREE.DoubleSide,depthWrite:false}));
+dome.position.set(32,1,0);scene.add(dome);
+cylinder(32,0,0,2.3,.2,materials.dark,false);
+for(let i=0;i<3;i++){
+ const orbit=new THREE.Mesh(new THREE.TorusGeometry(1.5+i*.65,.02,6,48),materials.glow);
+ orbit.position.set(32,2.4,0);orbit.rotation.x=Math.PI/2;scene.add(orbit);
+}
+for(const x of [26,38]){
+ box(x,1,3,2.5,.16,1.5,materials.slate);
+ box(x,1.45,2.7,1.5,.7,.08,materials.dark,false);
+ interact(x,1.8,3,'Observation console','A console overlooking the planetary projection.');
+}
+interact(32,2.4,0,'Planetary projection','Decorative planetary model.');
+
+// Silt Atrium: sand and benches.
+for(const z of [-5,0,5]){
+ box(0,.35,z-34,5,.55,.9,materials.slate);
+}
+interact(0,1,-34,'Stone bench','A bench in the quiet transition chamber.');
+
+// Workshop benches.
+for(const x of [-6,0,6]){
+ box(x,1,34,3.5,.18,2,materials.slate);
+ for(let i=0;i<4;i++)box(x-1.1+i*.72,1.5,33.3,.5,.9,.35,
+ i%2?materials.brass:materials.dark);
+ interact(x,1.8,34,'Workshop bench','A bench with parts and diagnostic lights.');
+}
+
+// Suspended moon.
+cylinder(0,0,0,2.5,.22,materials.dark,false);
+moon=new THREE.Mesh(new THREE.SphereGeometry(.68,24,18),
+new THREE.MeshStandardMaterial({color:0xc4cbd5,roughness:.9}));
+moon.position.set(0,6.8,0);scene.add(moon);
+moonLight=new THREE.PointLight(0x9ccbe8,1,16);moonLight.position.copy(moon.position);
+scene.add(moonLight);
+interact(0,1,0,'Suspended Moon','The moon changes phase as a visual simulation.');
+
+// Character bodies.
+function makePerson(name,x,z,color,accent){
+ const root=new THREE.Group();root.position.set(x,0,z);scene.add(root);
+ root.userData.entity=name;
+ const bodyMat=new THREE.MeshStandardMaterial({color});
+ const accentMat=new THREE.MeshStandardMaterial({color:accent,metalness:.3});
+ const skin=new THREE.MeshStandardMaterial({color:0xc9b4a9});
+ const torso=new THREE.Mesh(new THREE.CapsuleGeometry(.3,.65,5,10),bodyMat);
+ torso.position.y=1.15;root.add(torso);
+ const head=new THREE.Mesh(new THREE.SphereGeometry(.24,16,12),skin);
+ head.position.y=1.92;root.add(head);
+ const hair=new THREE.Mesh(new THREE.SphereGeometry(.26,16,12,0,Math.PI*2,0,Math.PI*.7),
+ new THREE.MeshStandardMaterial({color:0x202531}));
+ hair.position.set(0,2,-.03);root.add(hair);
+ for(const s of [-1,1]){
+  const arm=new THREE.Mesh(new THREE.CapsuleGeometry(.08,.45,4,8),bodyMat);
+  arm.position.set(s*.38,1.12,0);root.add(arm);
+  const leg=new THREE.Mesh(new THREE.CapsuleGeometry(.1,.48,4,8),accentMat);
+  leg.position.set(s*.15,.4,0);root.add(leg);
+ }
+ const halo=new THREE.Mesh(new THREE.TorusGeometry(.42,.025,6,24),accentMat);
+ halo.position.y=2.35;halo.rotation.x=Math.PI/2;root.add(halo);
+ root.traverse(o=>{if(o.isMesh)o.userData.entity=name});
+ people.push({name,root,home:{x,z},target:null,route:[],moving:false,
+ activity:'standing by',speed:1.8});
+}
+makePerson('ChatGPT',-5,-5.6,0x303a4b,0x8fcbe1);
+makePerson('Selene',5,-5.6,0x282b3b,0x9bcfe8);
+makePerson('Teo',0,7.5,0x3b3730,0xc7b68e);
+
+// Room routes follow the connecting corridors and stair slope.
+function destination(id){
+ const map={
+ atrium:[0,-8],vault:[-32,8],observatory:[32,7],
+ silt:[7,-34],workshop:[7,37],mezzanine:[6,-8]
+ };
+ return map[id]||map.atrium;
+}
+function roomAt(x,z){
+ return rooms.filter(r=>r.id!=='mezzanine').find(r=>
+ Math.abs(x-r.x)<r.w*.5&&Math.abs(z-r.z)<r.d*.5)||rooms[0];
+}
+function ground(x,z){
+ if(x>6.7&&x<9.3&&z<=4.1&&z>=-5.6)return Math.max(0,Math.min(2.6,(4.1-z)*.29));
+ if(x>1.8&&x<10.2&&z>-10.6&&z<-5.4)return 2.6;
+ return 0;
+}
+function blocked(x,z,y=ground(x,z),height=1.7){
+ for(const b of solids){
+  if(y+height<=b.minY+.03||y>=b.maxY-.03)continue;
+  if(x+radius>b.minX&&x-radius<b.maxX&&z+radius>b.minZ&&z-radius<b.maxZ)return true;
+ }
+ return false;
+}
+function routeFor(p,end){
+ // The destinations and connecting corridors are known waypoints.
+ const start={x:p.root.position.x,z:p.root.position.z};
+ const same=roomAt(start.x,start.z).id===roomAt(end.x,end.z).id;
+ let pts=[];
+ const targetRoom=rooms.find(r=>Math.abs(end.x-r.x)<r.w*.5&&Math.abs(end.z-r.z)<r.d*.5);
+ if(targetRoom?.id==='vault')pts=[{x:-17,z:0},end];
+ else if(targetRoom?.id==='observatory')pts=[{x:17,z:0},end];
+ else if(targetRoom?.id==='silt')pts=[{x:0,z:-18},{x:7,z:-18},end];
+ else if(targetRoom?.id==='workshop')pts=[{x:0,z:18},{x:7,z:18},end];
+ else if(targetRoom?.id==='mezzanine')pts=[{x:8,z:4},{x:8,z:-5},{x:6,z:-8}];
+ else pts=[{x:0,z:0},end];
+ // A route consists of room-connection waypoints. Retry if a waypoint is blocked.
+ return pts.filter((pt,i)=>i===pts.length-1||!blocked(pt.x,pt.z));
+}
+function walkTo(p,x,z,activity){
+ p.target={x,z};p.route=routeFor(p,p.target);p.route.push(p.target);
+ p.route=p.route.filter((pt,i,a)=>i===0||Math.hypot(pt.x-a[i-1].x,pt.z-a[i-1].z)>.2);
+ p.moving=p.route.length>0;p.activity=activity;
+}
+function executeAction(name,data,world={}){
+ const p=people.find(c=>c.name===name);if(!p)return;
+ const a=data.action||'idle';let t=null,activity='';
+ if(a==='go_to_room'||a==='walk_to_archive'){
+  const id=a==='walk_to_archive'?'vault':data.target_room||'atrium';
+  t=destination(id);activity='walking to '+(rooms.find(r=>r.id===id)?.name||id);
+ }else if(a==='return_to_desk'||a==='walk_to_terminal'){
+  t=p.home;activity='returning to workstation';
+ }else if(a==='approach_operator'||a==='turn_to_operator'){
+  const op=world.operator_position||{x:0,z:10};t={x:Number(op.x)||0,z:(Number(op.z)||10)+1.5};
+  activity='approaching the operator';
+ }else if(['inspect_object','inspect_display','sit_at_console'].includes(a)){
+  const obj=objects.find(o=>o.label===data.target_object)||objects.find(o=>o.label.includes('workstation'));
+  if(obj){t={x:obj.x,z:obj.z+1.2};activity='inspecting '+obj.label;}
+  else{t=destination('atrium');activity='heading to a workstation';}
+ }else if(a==='gesture_explain'){
+  p.activity='explaining something';return;
+ }else if(a==='idle'){
+  p.moving=false;p.route=[];p.activity='standing by';return;
+ }else{t=destination('atrium');activity='moving through the office';}
+ walkTo(p,t.x,t.z,activity);
+}
+function updatePeople(dt){
+ for(const p of people){
+  if(!p.moving||!p.route.length)continue;
+  const pt=p.route[0],dx=pt.x-p.root.position.x,dz=pt.z-p.root.position.z;
+  const dist=Math.hypot(dx,dz);
+  if(dist<.16){p.route.shift();if(!p.route.length){p.moving=false;p.activity='at destination';}continue;}
+  const step=Math.min(dist,p.speed*dt),nx=p.root.position.x+dx/dist*step,nz=p.root.position.z+dz/dist*step;
+  if(blocked(nx,nz)){p.activity='paused by an obstacle';p.moving=false;continue;}
+  p.root.position.set(nx,ground(nx,nz),nz);p.root.rotation.y=Math.atan2(dx,dz);
+ }
+}
+function toast(msg){$('#toast').textContent=msg;$('#toast').style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').style.display='none',2500)}
+
+// Room destination shortcuts.
+for(const r of rooms){
+ const b=document.createElement('button');b.textContent=r.name;
+ b.addEventListener('click',()=>{
+  camera.position.set(r.x,eyeHeight,r.id==='atrium'?10:r.z+r.d*.25);
+  feet=0;vy=0;onGround=true;toast('Moved near '+r.name);
+ });
+ $('#roomButtons').appendChild(b);
+}
+
+// Camera and player controls.
+function look(dx,dy){
+ yaw-=dx*.0022;pitch=Math.max(-1.35,Math.min(1.35,pitch-dy*.0022));
+ camera.rotation.set(pitch,yaw,0,'YXZ');
+}
+function capture(){
+ if(mode==='fps')renderer.domElement.requestPointerLock?.();
+}
+renderer.domElement.addEventListener('click',e=>{
+ if(dragMoved){dragMoved=false;return;}
+ if(locked){
+  const obj=aimed();if(obj?.userData.entity){talk(obj.userData.entity);return;}
+  const hit=objects.find(o=>o.orb===obj||o.ring===obj);
+  if(hit)toast(hit.label+': '+hit.description);
+ }else{
+  const person=pick(e.clientX,e.clientY);
+  if(person)talk(person);else capture();
+ }
+});
+document.addEventListener('pointerlockchange',()=>locked=document.pointerLockElement===renderer.domElement);
+document.addEventListener('mousemove',e=>{
+ if($('#chat').style.display==='block')return;
+ if(locked){look(e.movementX,e.movementY);return;}
+ if(drag){look(e.clientX-lastX,e.clientY-lastY);dragMoved=true;}
+ lastX=e.clientX;lastY=e.clientY;
+});
+renderer.domElement.addEventListener('mousedown',e=>{
+ if(e.button===0&&!locked&&mode==='fps'){drag=true;lastX=e.clientX;lastY=e.clientY;dragMoved=false;}
+});
+document.addEventListener('mouseup',()=>drag=false);
+document.addEventListener('keydown',e=>{
+ const k=e.key.toLowerCase();keys[k]=true;
+ if(k==='e')interactTarget();
+ if(k===' '&&mode==='fps'&&onGround){vy=7;onGround=false;}
+ if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright',' ','control'].includes(k))e.preventDefault();
+});
+document.addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+$('#fps').onclick=()=>{mode='fps';$('#fps').classList.add('active');$('#free').classList.remove('active');capture();};
+$('#free').onclick=()=>{mode='free';$('#free').classList.add('active');$('#fps').classList.remove('active');document.exitPointerLock?.();toast('Freecam enabled');};
+
+function movePlayer(dt){
+ if($('#chat').style.display==='block')return;
+ const speed=(keys.shift?2.5:5)*(mode==='free'?1.6:1);
+ const f=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+ const r=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+ const v=new THREE.Vector3();
+ if(keys.w||keys.arrowup)v.add(f);if(keys.s||keys.arrowdown)v.sub(f);
+ if(keys.d||keys.arrowright)v.add(r);if(keys.a||keys.arrowleft)v.sub(r);
+ if(mode==='free'){
+  if(v.lengthSq()){v.normalize().multiplyScalar(speed*dt);camera.position.add(v);}
+  if(keys[' '])camera.position.y+=speed*dt;if(keys.control)camera.position.y-=speed*dt;
+  return;
+ }
+ if(v.lengthSq()){
+  v.normalize().multiplyScalar(speed*dt);
+  const nx=camera.position.x+v.x,nz=camera.position.z+v.z;
+  if(!blocked(nx,camera.position.z,feet))camera.position.x=nx;
+  if(!blocked(camera.position.x,nz,feet))camera.position.z=nz;
+ }
+ const floor=ground(camera.position.x,camera.position.z);
+ if(!onGround||vy>0){feet+=vy*dt;vy-=18*dt;if(feet<=floor){feet=floor;vy=0;onGround=true;}}
+ else feet=floor;
+ camera.position.y=feet+eyeHeight;
+}
+function aimed(){
+ raycaster.setFromCamera(center,camera);
+ const meshes=[];
+ for(const p of people)p.root.traverse(o=>{if(o.isMesh)meshes.push(o);});
+ for(const o of objects){meshes.push(o.orb,o.ring);}
+ const hit=raycaster.intersectObjects(meshes,false)[0];
+ return hit?.object||null;
+}
+function pick(x,y){
+ const rect=renderer.domElement.getBoundingClientRect();
+ raycaster.setFromCamera(new THREE.Vector2((x-rect.left)/rect.width*2-1,
+ -((y-rect.top)/rect.height)*2+1),camera);
+ const meshes=[];for(const p of people)p.root.traverse(o=>{if(o.isMesh)meshes.push(o);});
+ const hit=raycaster.intersectObjects(meshes,false)[0];
+ return hit?.object?.userData.entity||null;
+}
+function interactTarget(){
+ const obj=aimed();if(!obj){toast('Aim at a character or object.');return;}
+ if(obj.userData.entity){talk(obj.userData.entity);return;}
+ const hit=objects.find(o=>o.orb===obj||o.ring===obj);
+ if(hit)toast(hit.label+': '+hit.description);
+}
+function talk(name){
+ const p=people.find(c=>c.name===name);
+ if(!p||Math.hypot(camera.position.x-p.root.position.x,camera.position.z-p.root.position.z)>5){
+  toast('Move closer to '+name+' first.');return;
+ }
+ selected=name;document.exitPointerLock?.();
+ $('#chat').style.display='block';$('#chatTitle').textContent='Talking to '+name;
+ $('#log').textContent='You approached '+name+'.';
+ $('#message').focus();
+}
+$('#close').onclick=()=>{$('#chat').style.display='none';selected=null;};
+function log(who,msg){$('#log').textContent+='\n\n'+who+': '+msg;$('#log').scrollTop=$('#log').scrollHeight;}
+async function send(){
+ const message=$('#message').value.trim();if(!message||!selected)return;
+ $('#message').value='';log('You',message);$('#status').textContent='Waiting for '+selected+'…';
+ const p=people.find(c=>c.name===selected);
+ const world={location:'Selene Office',entity_state:{activity:p.activity,
+ position:{x:p.root.position.x,y:p.root.position.y,z:p.root.position.z}},
+ nearby_entities:people.filter(c=>c!==p).map(c=>({name:c.name,activity:c.activity,
+ position:{x:c.root.position.x,y:c.root.position.y,z:c.root.position.z} })),
+ available_rooms:rooms.map(r=>({id:r.id,name:r.name})),
+ operator_position:{x:camera.position.x,y:camera.position.y,z:camera.position.z}};
+ try{
+  const res=await fetch('/api/query',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({entity:selected,message,world})});
+  const data=await res.json();if(!res.ok)throw Error(data.error||res.status);
+  log(selected,data.reply||'');$('#status').textContent='Connected · '+(data.mood||'focused');
+  if(data.action)executeAction(selected,data,world);
+ }catch(err){log('System','Could not reach Flask: '+err.message);$('#status').textContent='Connection failed';}
+}
+$('#send').onclick=send;
+$('#message').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
+
+$('#auto').onclick=()=>{
+ autonomy=!autonomy;$('#auto').textContent='Autonomy: '+(autonomy?'On':'Off');
+ $('#auto').classList.toggle('active',autonomy);
+ toast(autonomy?'Autonomous decisions enabled.':'Autonomy paused.');
+};
+let nextPerson=0;
+async function autonomyStep(){
+ if(!autonomy||autonomyBusy||selected)return;
+ autonomyBusy=true;
+ try{
+  const p=people[nextPerson++%people.length];
+  if(p.moving)return;
+  const world={location:'Selene Office',
+   entity_state:{activity:p.activity,position:{x:p.root.position.x,y:p.root.position.y,z:p.root.position.z}},
+   nearby_entities:people.filter(c=>c!==p).map(c=>({name:c.name,activity:c.activity,
+   position:{x:c.root.position.x,y:c.root.position.y,z:c.root.position.z}})),
+   operator_position:{x:camera.position.x,y:camera.position.y,z:camera.position.z},
+   available_rooms:rooms.map(r=>({id:r.id,name:r.name})),
+   available_objects:objects.map(o=>({name:o.label,description:o.description})),
+   current_activity:p.activity};
+  const res=await fetch('/api/autonomy/decide',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({entity:p.name,world})});
+  if(res.ok){const data=await res.json();executeAction(p.name,data,world);
+  if(data.action&&data.action!=='idle')toast(p.name+': '+data.action);}
+ }catch(e){console.warn('Autonomy request failed',e);}
+ finally{autonomyBusy=false;}
+}
+setInterval(autonomyStep,30000);
+
+// Save and restore character positions.
+async function restore(){
+ try{
+  const res=await fetch('/api/entity-state');if(!res.ok)return;
+  const data=await res.json();
+  for(const s of data.entities||[]){
+   const p=people.find(c=>c.name===s.entity);
+   if(p&&Number.isFinite(Number(s.x))&&Number.isFinite(Number(s.z))){
+    p.root.position.set(Number(s.x),ground(Number(s.x),Number(s.z)),Number(s.z));
+    p.activity=s.activity||p.activity;
+   }
+  }
+ }catch(e){console.warn('Restore state failed',e);}
+}
+async function save(){
+ try{
+  await fetch('/api/entity-state',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({entities:people.map(p=>({entity:p.name,
+  position:{x:p.root.position.x,y:p.root.position.y,z:p.root.position.z},
+  activity:p.activity,room_id:roomAt(p.root.position.x,p.root.position.z).id}))})});
+ }catch(e){console.warn('Save state failed',e);}
+}
+restore();setInterval(save,15000);window.addEventListener('beforeunload',save);
+
+function nearestPrompt(){
+ let best=null,dist=2.8;
+ for(const p of people){const d=Math.hypot(camera.position.x-p.root.position.x,camera.position.z-p.root.position.z);
+ if(d<dist){dist=d;best='Click '+p.name+' to talk · E to interact';}}
+ for(const o of objects){const d=Math.hypot(camera.position.x-o.x,camera.position.z-o.z);
+ if(d<dist){dist=d;best='E to inspect '+o.label;}}
+ $('#prompt').style.display=best?'block':'none';if(best)$('#prompt').textContent=best;
+}
+const clock=new THREE.Clock();
+function animate(){
+ requestAnimationFrame(animate);
+ const dt=Math.min(clock.getDelta(),.04);
+ movePlayer(dt);updatePeople(dt);
+ moon.rotation.y+=dt*.12;
+ const phase=(Math.sin(performance.now()*.00016)+1)/2;
+ moon.material.color.setRGB(.45+.45*phase,.48+.43*phase,.54+.4*phase);
+ moonLight.intensity=.35+phase;
+ for(const o of objects)o.ring.rotation.z+=dt*.35;
+ nearestPrompt();renderer.render(scene,camera);
+}
+window.addEventListener('resize',()=>{
+ camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+animate();
+</script>
+</body>
+</html>
