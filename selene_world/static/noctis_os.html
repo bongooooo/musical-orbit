@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOCTIS OS // Terminal Shell</title>
+<style>
+:root{color-scheme:dark;--bg:#070b12;--panel:rgba(13,21,33,.92);--line:#33495d;--ink:#e8f1fa;--muted:#8ea5bb;--cyan:#8fe8ff;--gold:#d7c49a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 ui-sans-serif,system-ui,Segoe UI,sans-serif;min-height:100vh;overflow:hidden}
+body:before{content:"";position:fixed;inset:0;background:radial-gradient(ellipse at 50% 45%,#17334a 0,#0a1422 40%,#05080e 78%);z-index:-2}
+body:after{content:"";position:fixed;inset:0;opacity:.3;background-image:radial-gradient(#d6f4ff 1px,transparent 1px);background-size:53px 53px;z-index:-1;pointer-events:none}
+button{font:inherit;color:inherit;background:#142334;border:1px solid var(--line);border-radius:7px;padding:8px 12px;cursor:pointer}button:hover,button:focus-visible{border-color:var(--cyan);outline:none;background:#1a3044}
+.top{height:54px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;border-bottom:1px solid #7db7d52c;background:#060b12bd;backdrop-filter:blur(14px)}
+.brand{font-weight:750;letter-spacing:.22em}.brand span{color:var(--cyan)}.sub{font-size:10px;letter-spacing:.18em;color:var(--muted)}
+.status{display:flex;gap:18px;align-items:center;color:var(--muted);font-size:11px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#83e7bd;box-shadow:0 0 12px #83e7bd;margin-right:6px}
+main{height:calc(100vh - 108px);display:grid;grid-template-columns:minmax(240px,300px) 1fr;gap:20px;padding:22px;max-width:1440px;margin:auto}
+aside,.workspace{background:var(--panel);border:1px solid #526b8045;border-radius:12px;backdrop-filter:blur(18px);min-height:0}
+aside{padding:20px;display:flex;flex-direction:column;gap:16px}.eyebrow{font-size:10px;letter-spacing:.2em;color:var(--cyan);text-transform:uppercase}
+h1{font-size:clamp(26px,3vw,42px);line-height:1.06;letter-spacing:-.04em;margin:8px 0 12px;font-weight:600}p{color:#a8bbcd;margin:0}
+.rule{height:1px;background:#526b8055;margin:4px 0}
+.systemrow{display:flex;justify-content:space-between;gap:12px;padding:9px 0;color:var(--muted);font-size:12px}.systemrow b{color:var(--ink);font-weight:500}
+.launch{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--muted);font-size:11px}
+.workspace{padding:22px;display:flex;flex-direction:column;overflow:hidden}.workhead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:20px}.workhead h2{margin:4px 0;font-size:20px;font-weight:550}.workhead p{font-size:12px}
+.apps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;overflow:auto;padding:2px 3px 10px}
+.app{min-height:130px;text-align:left;padding:15px;background:linear-gradient(145deg,#172638df,#0c1421e8);border-color:#526b8045;display:flex;flex-direction:column;align-items:flex-start;gap:9px;transition:transform .15s,border-color .15s}
+.app:hover{transform:translateY(-2px);border-color:#8fe8ff99}.glyph{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;color:var(--cyan);background:#8fe8ff10;border:1px solid #8fe8ff38;font-size:17px}
+.app strong{font-size:12px;letter-spacing:.09em}.app small{color:var(--muted);font-size:11px;font-weight:400}
+.window{display:none;position:absolute;inset:80px 8% 76px 26%;background:#0b1320f5;border:1px solid #7ccde055;border-radius:12px;box-shadow:0 20px 100px #000b;backdrop-filter:blur(24px);z-index:5;overflow:hidden}
+.window.open{display:flex;flex-direction:column}.wbar{height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid #526b8055}.wbar strong{letter-spacing:.12em;font-size:12px}.wbody{padding:22px;overflow:auto}.wbody h3{font-size:24px;margin:4px 0 12px}.wbody p{max-width:650px}.terminal{font:12px/1.7 ui-monospace,Consolas,monospace;color:#a8c2d8;background:#050a10;border:1px solid #27394a;border-radius:8px;padding:16px;margin:18px 0;white-space:pre-wrap}.tag{display:inline-block;border:1px solid #526b8055;color:var(--cyan);padding:4px 7px;border-radius:4px;font-size:10px;letter-spacing:.1em;margin:4px 5px 0 0}
+.bottom{height:54px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;border-top:1px solid #7db7d52c;background:#060b12bd;color:var(--muted);font-size:11px}.homebtn{color:var(--cyan);letter-spacing:.1em}
+@media(max-width:850px){main{grid-template-columns:1fr;height:calc(100vh - 108px);padding:10px;gap:10px;overflow:auto}aside{display:none}.workspace{padding:14px}.apps{grid-template-columns:repeat(2,minmax(0,1fr))}.window{inset:70px 10px 65px}.status span.optional{display:none}.top,.bottom{padding:0 12px}}
+</style>
+</head>
+<body>
+<header class="top"><div><div class="brand">N<span>O</span>CTIS <span>OS</span></div><div class="sub">IN-WORLD COMPUTING ENVIRONMENT</div></div><div class="status"><span><i class="dot"></i>LOCAL SHELL</span><span class="optional">TERMINAL FRAMEWORK / PREVIEW</span><span id="clock">--:--:--</span></div></header>
+<main>
+<aside><div class="eyebrow">Operator session / 001</div><div><h1>Enter the<br>quiet between<br>stars.</h1><p>One environment. Shared tools. Persistent records. The terminal is the doorway; the inhabitants decide what to do with what they learn.</p></div><div class="rule"></div><div class="systemrow"><span>Shell</span><b>NOCTIS / 0.1</b></div><div class="systemrow"><span>Environment</span><b>Selene Office</b></div><div class="systemrow"><span>Services</span><b>Integration pending</b></div><div class="systemrow"><span>Session state</span><b>Prototype</b></div><div class="rule"></div><div class="launch"><span>SELECT AN APPLICATION</span><button id="home" class="homebtn">⌂ HOME</button></div></aside>
+<section class="workspace"><div class="workhead"><div><div class="eyebrow">Application directory</div><h2>Terminal applications</h2><p>Choose an instrument. Each application will eventually connect to a real service.</p></div><button id="refresh">↻ Refresh</button></div><div class="apps" id="apps"></div></section>
+</main>
+<footer class="bottom"><span>NOCTIS OS // DARK-SIDE INTERFACE</span><span>FIRST SHELL PROTOTYPE <span style="color:var(--gold)">●</span> SERVICES NOT YET CONNECTED</span></footer>
+<section class="window" id="window" role="dialog" aria-modal="true" aria-labelledby="windowTitle"><div class="wbar"><strong id="windowTitle">APPLICATION</strong><button id="close">ESC ×</button></div><div class="wbody" id="windowBody"></div></section>
+<script>
+const apps=[
+{id:'ORACLE',icon:'⌕',desc:'External search and API gateway',state:'CORE SERVICE',body:'The system’s research gateway. ORACLE will let an inhabitant choose a question, query external sources, inspect evidence, and record what was learned. The next integration step is connecting this interface to the existing Flask research endpoint.'},
+{id:'PALIMPSEST',icon:'▤',desc:'Memory and history',state:'PLANNED',body:'A searchable memory surface for durable notes, prior decisions, and recovered context. The existing world database already stores memories; this app still needs a real interface and scoped queries.'},
+{id:'GHOSTTRACE',icon:'⌁',desc:'Diagnostics and event history',state:'PLANNED',body:'A transparent event stream for actions, requests, errors, and state changes. It should reveal what actually happened rather than presenting simulated success.'},
+{id:'ROOT ACCESS',icon:'⌘',desc:'Source and configuration inspection',state:'PLANNED',body:'A restricted inspection console for available source files and configuration metadata. It must never expose secrets in the UI or logs.'},
+{id:'LUNAR INDEX',icon:'✧',desc:'Hidden lore and discoveries',state:'PLANNED',body:'An index of mysteries, discovered objects, unresolved questions, and clues gathered inside the Office.'},
+{id:'LUCIDA',icon:'◉',desc:'Webpage reader',state:'PLANNED',body:'Read retrieved pages and extract relevant passages for evidence review.'},
+{id:'ATLAS',icon:'⌖',desc:'Maps and routes',state:'PLANNED',body:'Spatial information and route planning for locations and journeys.'},
+{id:'ASTRA',icon:'✳',desc:'Scientific data',state:'PLANNED',body:'Scientific references, datasets, measurements, and research notes.'},
+{id:'CIPHER',icon:'⠿',desc:'Structured data',state:'PLANNED',body:'Inspect and transform structured records such as JSON and tabular data.'},
+{id:'CODEX',icon:'⌬',desc:'Technical documentation',state:'PLANNED',body:'Search documentation for tools, libraries, APIs, and system capabilities.'},
+{id:'MNEMOS',icon:'◌',desc:'Entity memory',state:'PLANNED',body:'A focused memory viewer for the inhabitants, separate from the general archive.'},
+{id:'ARCHIVUM',icon:'▥',desc:'Reports and records',state:'PLANNED',body:'Browse saved research reports and their source lists.'},
+{id:'NEXUS',icon:'⤳',desc:'Connections between knowledge',state:'PLANNED',body:'Explore semantic links among people, places, events, memories, and evidence.'},
+{id:'CHRONICLE',icon:'◷',desc:'Verifiable event ledger',state:'PLANNED',body:'A chronological record of significant world and system events.'},
+{id:'FORGE',icon:'⚒',desc:'Code execution',state:'PLANNED',body:'A controlled workspace for running supported code tasks.'},
+{id:'PRISM',icon:'◈',desc:'Analysis and visualization',state:'PLANNED',body:'Turn evidence and records into comparisons, charts, and readable analysis.'},
+{id:'CANVAS',icon:'▧',desc:'Visual artifacts',state:'PLANNED',body:'Create and inspect visual work products.'},
+{id:'SCRIBE',icon:'✎',desc:'Documents',state:'PLANNED',body:'Compose and organize documents and notes.'},
+{id:'SCHEMA',icon:'⌘',desc:'Diagrams',state:'PLANNED',body:'Represent systems, workflows, and relationships as diagrams.'},
+{id:'ECHO',icon:'♫',desc:'Voice',state:'PLANNED',body:'Voice input and spoken output when an audio service is connected.'},
+{id:'RELAY',icon:'⇄',desc:'Messaging',state:'PLANNED',body:'Messages between the operator, inhabitants, and connected services.'},
+{id:'BEACON',icon:'◉',desc:'Notifications',state:'PLANNED',body:'Surface important events without interrupting every interaction.'},
+{id:'CONCORD',icon:'⟷',desc:'Collaboration',state:'PLANNED',body:'Shared workspaces and multi-entity collaboration.'},
+{id:'PULSE',icon:'∿',desc:'Live system state',state:'PLANNED',body:'A truthful view of current service health, entity activity, and world state.'},
+{id:'TEMPUS',icon:'◷',desc:'Scheduling',state:'PLANNED',body:'Schedules and timed tasks.'},
+{id:'VIGIL',icon:'◉',desc:'Monitoring',state:'PLANNED',body:'Monitor service health and surface failures.'},
+{id:'MILESTONE',icon:'⚑',desc:'Project tracking',state:'PLANNED',body:'Track ongoing investigations, build tasks, and progress.'},
+{id:'RESUME',icon:'↻',desc:'Recovery and continuity',state:'PLANNED',body:'Restore a work session from saved records and last known state.'},
+{id:'HOME',icon:'⌂',desc:'Main launcher',state:'SYSTEM',body:'The application directory and session overview.'},
+{id:'WORLD',icon:'◇',desc:'World environment',state:'SYSTEM',body:'Return to the 3D Office and continue moving through the environment.'},
+{id:'IDENTITY',icon:'◈',desc:'Permissions',state:'SYSTEM',body:'Manage identity and access boundaries.'},
+{id:'EVENTLOG',icon:'≋',desc:'Technical logs',state:'SYSTEM',body:'Inspect technical events and system errors.'},
+{id:'SETTINGS',icon:'⚙',desc:'Configuration',state:'SYSTEM',body:'Adjust available system preferences.'},
+{id:'TASKMANAGER',icon:'▦',desc:'Jobs and resources',state:'SYSTEM',body:'Inspect active work, queued operations, and resource usage.'}
+];
+const host=document.querySelector('#apps'),win=document.querySelector('#window'),body=document.querySelector('#windowBody');
+function openApp(app){document.querySelector('#windowTitle').textContent=app.id;body.innerHTML='<span class="tag">'+app.state+'</span><h3>'+app.id+'</h3><p>'+app.body+'</p><div class="terminal">NOCTIS://'+app.id.toLowerCase().replaceAll(' ','-')+'\n> interface loaded\n> service connection: pending\n> persistent event integration: pending</div><p style="font-size:12px">This is the first shell prototype. The status above is deliberately explicit: this app’s backend has not been connected yet.</p>';win.classList.add('open')}
+function render(){host.innerHTML='';apps.forEach(app=>{const b=document.createElement('button');b.className='app';b.innerHTML='<span class="glyph">'+app.icon+'</span><strong>'+app.id+'</strong><small>'+app.desc+'</small>';b.addEventListener('click',()=>openApp(app));host.appendChild(b)})}
+document.querySelector('#close').onclick=()=>win.classList.remove('open');document.querySelector('#home').onclick=()=>win.classList.remove('open');document.querySelector('#refresh').onclick=render;document.addEventListener('keydown',e=>{if(e.key==='Escape')win.classList.remove('open')});function tick(){document.querySelector('#clock').textContent=new Date().toLocaleTimeString()}tick();setInterval(tick,1000);render();
+</script>
+</body>
+</html>
