@@ -376,8 +376,7 @@ def query():
 
     save_event(entity, f"Query: {message[:400]}")
 
-    if result.get("intention") or result.get("action") == "idle":
-        save_intention(entity, result.get("intention", ""))
+    save_intention(entity, result.get("intention", ""))
 
     if result.get("memory"):
         save_memory(entity, "experience", result["memory"])
@@ -435,8 +434,7 @@ def autonomy_decide():
         f"{result.get('target_room', '')} | Intention: {result.get('intention', '')}",
     )
 
-    if result.get("intention") or result.get("action") == "idle":
-        save_intention(entity, result.get("intention", ""))
+    save_intention(entity, result.get("intention", ""))
 
     if result.get("memory"):
         save_memory(entity, "experience", result["memory"])
