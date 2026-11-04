@@ -89,6 +89,13 @@ def init_db():
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS intentions (
+                entity TEXT PRIMARY KEY,
+                intention TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS entity_state (
                 entity TEXT PRIMARY KEY,
                 room_id TEXT NOT NULL DEFAULT 'atrium',
@@ -139,6 +146,27 @@ def save_event(entity, event):
         )
 
 
+def current_intention(entity):
+    with db() as conn:
+        row = conn.execute(
+            "SELECT intention FROM intentions WHERE entity=?",
+            (entity,),
+        ).fetchone()
+    return row["intention"] if row else ""
+
+
+def save_intention(entity, intention):
+    value = str(intention or "")[:500]
+    with db() as conn:
+        conn.execute("""
+            INSERT INTO intentions(entity, intention, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(entity) DO UPDATE SET
+                intention=excluded.intention,
+                updated_at=excluded.updated_at
+        """, (entity, value, now()))
+
+
 def fallback_reply(entity, message):
     lower = message.lower()
 
@@ -165,6 +193,7 @@ def fallback_reply(entity, message):
         "target_object": "",
         "mood": "focused",
         "memory": "",
+        "intention": "",
     }
 
 
@@ -194,6 +223,7 @@ Return ONLY a JSON object with these keys:
 - target_object: exact object name from available_objects, or empty string
 - mood: focused, curious, uncertain, calm, or frustrated
 - memory: one short durable note worth retaining, or empty string
+- intention: your current self-chosen intention, or empty string if you have none
 
 Allowed actions:
 idle, go_to_room, walk_to_archive, walk_to_terminal, return_to_desk,
@@ -208,11 +238,13 @@ Choose destinations and objects from the supplied world snapshot.
 
     if autonomous:
         system += """
-This is an autonomous decision, not a reply to an operator question.
-Choose one sensible activity for yourself based on your current state.
-Avoid repeating the same destination without a reason.
-Do not claim you have arrived anywhere.
-Return a valid action and target room.
+A world event has prompted this decision; this is not a scheduled check-in.
+Read the trigger_event, your current intention, memories, and world snapshot.
+Decide for yourself whether the event gives you a reason to act, continue,
+revise, or abandon your current intention. You may choose idle if you have
+nothing meaningful to do. Do not invent urgency or repeat destinations without
+a reason. If you choose an activity, state the intention behind it.
+Do not claim you have arrived anywhere; the world must execute the action.
 """
 
     context = {
@@ -246,6 +278,7 @@ Return a valid action and target room.
             "target_object": "",
             "mood": "uncertain",
             "memory": "",
+            "intention": "",
         }
 
     if data.get("action") not in ALLOWED_ACTIONS:
@@ -260,6 +293,7 @@ Return a valid action and target room.
     data["reply"] = str(data.get("reply", ""))[:3000]
     data["target_object"] = str(data.get("target_object", ""))[:120]
     data["memory"] = str(data.get("memory", ""))[:1000]
+    data["intention"] = str(data.get("intention", ""))[:500]
 
     return data
 
@@ -342,6 +376,9 @@ def query():
 
     save_event(entity, f"Query: {message[:400]}")
 
+    if result.get("intention") or result.get("action") == "idle":
+        save_intention(entity, result.get("intention", ""))
+
     if result.get("memory"):
         save_memory(entity, "experience", result["memory"])
 
@@ -361,6 +398,7 @@ def query():
         "target_object": result.get("target_object", ""),
         "mood": result["mood"],
         "memory_saved": bool(result.get("memory")),
+        "intention": result.get("intention", current_intention(entity)),
     })
 
 
@@ -375,10 +413,12 @@ def autonomy_decide():
     if not isinstance(world, dict):
         return jsonify({"error": "World snapshot must be an object."}), 400
 
+    trigger_event = str(body.get("trigger_event") or world.get("trigger_event") or "A change in the world needs your attention.")[:500]
+
     try:
         result = ask_model(
             entity,
-            "Choose your next autonomous activity from the world snapshot.",
+            "A world event occurred: " + trigger_event + " Decide what, if anything, you want to do next.",
             recent_memories(entity),
             world,
             autonomous=True,
@@ -391,9 +431,12 @@ def autonomy_decide():
 
     save_event(
         entity,
-        f"Autonomous choice: {result.get('action')} -> "
-        f"{result.get('target_room', '')}",
+        f"World event: {trigger_event} | Choice: {result.get('action')} -> "
+        f"{result.get('target_room', '')} | Intention: {result.get('intention', '')}",
     )
+
+    if result.get("intention") or result.get("action") == "idle":
+        save_intention(entity, result.get("intention", ""))
 
     if result.get("memory"):
         save_memory(entity, "experience", result["memory"])
@@ -405,7 +448,17 @@ def autonomy_decide():
         "target_object": result.get("target_object", ""),
         "mood": result["mood"],
         "reply": result.get("reply", ""),
+        "intention": result.get("intention", current_intention(entity)),
     })
+
+
+@app.get("/api/intentions")
+def get_intentions():
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT entity, intention FROM intentions"
+        ).fetchall()
+    return jsonify({"intentions": {row["entity"]: row["intention"] for row in rows}})
 
 
 @app.get("/api/entity-state")
