@@ -38,7 +38,7 @@ border-radius:7px;padding:9px}
 <div id="controls" class="panel">
 <button id="fps" class="active">FPS Walk</button>
 <button id="free">Freecam</button>
-<button id="auto">Autonomy: Off</button>
+<span id="inhabitant-mode" aria-live="polite">Inhabitants · event-driven</span>
 </div>
 <div id="rooms" class="panel"><b>DESTINATIONS</b><div id="roomButtons"></div></div>
 <div id="help" class="panel">
@@ -96,7 +96,7 @@ const keys={};
 const radius=.34,eyeHeight=1.68;
 let yaw=0,pitch=0,feet=0,vy=0,onGround=true;
 let mode='fps',locked=false,drag=false,lastX=0,lastY=0,dragMoved=false;
-let selected=null,autonomy=false,autonomyBusy=false;
+let selected=null;
 let moon,moonLight;
 
 const rooms=[
@@ -254,7 +254,7 @@ function makePerson(name,x,z,color,accent){
  halo.position.y=2.35;halo.rotation.x=Math.PI/2;root.add(halo);
  root.traverse(o=>{if(o.isMesh)o.userData.entity=name});
  people.push({name,root,home:{x,z},target:null,route:[],moving:false,
- activity:'standing by',speed:1.8});
+ activity:'standing by',intention:'',speed:1.8});
 }
 makePerson('ChatGPT',-5,-5.6,0x303a4b,0x8fcbe1);
 makePerson('Selene',5,-5.6,0x282b3b,0x9bcfe8);
@@ -331,13 +331,30 @@ function updatePeople(dt){
   if(!p.moving||!p.route.length)continue;
   const pt=p.route[0],dx=pt.x-p.root.position.x,dz=pt.z-p.root.position.z;
   const dist=Math.hypot(dx,dz);
-  if(dist<.16){p.route.shift();if(!p.route.length){p.moving=false;p.activity='at destination';}continue;}
+  if(dist<.16){
+    p.route.shift();
+    if(!p.route.length){
+     p.moving=false;p.activity='at destination';
+     save();
+     requestDecision(p.name,'You have arrived at your destination. Reassess your intention in light of what you found.');
+    }
+    continue;
+   }
   const step=Math.min(dist,p.speed*dt),nx=p.root.position.x+dx/dist*step,nz=p.root.position.z+dz/dist*step;
-  if(blocked(nx,nz)){p.activity='paused by an obstacle';p.moving=false;continue;}
+  if(blocked(nx,nz)){
+    p.activity='paused by an obstacle';p.moving=false;
+    save();
+    requestDecision(p.name,'Your attempted route was blocked. Observe the obstacle and decide what to do instead.');
+    continue;
+   }
   p.root.position.set(nx,ground(nx,nz),nz);p.root.rotation.y=Math.atan2(dx,dz);
  }
 }
-function toast(msg){$('#toast').textContent=msg;$('#toast').style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').style.display='none',2500)}
+function toast(msg){
+ $('#toast').textContent=msg;
+ $('#toast').style.display='block';
+}
+$('#toast').addEventListener('click',()=>$('#toast').style.display='none');
 
 // Room destination shortcuts.
 for(const r of rooms){
@@ -451,8 +468,8 @@ async function send(){
  const message=$('#message').value.trim();if(!message||!selected)return;
  $('#message').value='';log('You',message);$('#status').textContent='Waiting for '+selected+'…';
  const p=people.find(c=>c.name===selected);
- const world={location:'Selene Office',entity_state:{activity:p.activity,
- position:{x:p.root.position.x,y:p.root.position.y,z:p.root.position.z}},
+ const world={location:'Selene Office',entity_state:{activity:p.activity,intention:p.intention||'',
+  position:{x:p.root.position.x,y:p.root.position.y,z:p.root.position.z}},
  nearby_entities:people.filter(c=>c!==p).map(c=>({name:c.name,activity:c.activity,
  position:{x:c.root.position.x,y:c.root.position.y,z:c.root.position.z} })),
  available_rooms:rooms.map(r=>({id:r.id,name:r.name})),
@@ -462,52 +479,83 @@ async function send(){
   body:JSON.stringify({entity:selected,message,world})});
   const data=await res.json();if(!res.ok)throw Error(data.error||res.status);
   log(selected,data.reply||'');$('#status').textContent='Connected · '+(data.mood||'focused');
-  if(data.action)executeAction(selected,data,world);
+   if(typeof data.intention==='string')p.intention=data.intention;
+   if(data.action)executeAction(selected,data,world);
+   await save();
  }catch(err){log('System','Could not reach Flask: '+err.message);$('#status').textContent='Connection failed';}
 }
 $('#send').onclick=send;
 $('#message').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
 
-$('#auto').onclick=()=>{
- autonomy=!autonomy;$('#auto').textContent='Autonomy: '+(autonomy?'On':'Off');
- $('#auto').classList.toggle('active',autonomy);
- toast(autonomy?'Autonomous decisions enabled.':'Autonomy paused.');
-};
-let nextPerson=0;
-async function autonomyStep(){
- if(!autonomy||autonomyBusy||selected)return;
- autonomyBusy=true;
- try{
-  const p=people[nextPerson++%people.length];
-  if(p.moving)return;
-  const world={location:'Selene Office',
-   entity_state:{activity:p.activity,position:{x:p.root.position.x,y:p.root.position.y,z:p.root.position.z}},
-   nearby_entities:people.filter(c=>c!==p).map(c=>({name:c.name,activity:c.activity,
-   position:{x:c.root.position.x,y:c.root.position.y,z:c.root.position.z}})),
-   operator_position:{x:camera.position.x,y:camera.position.y,z:camera.position.z},
-   available_rooms:rooms.map(r=>({id:r.id,name:r.name})),
-   available_objects:objects.map(o=>({name:o.label,description:o.description})),
-   current_activity:p.activity};
-  const res=await fetch('/api/autonomy/decide',{method:'POST',headers:{'Content-Type':'application/json'},
-  body:JSON.stringify({entity:p.name,world})});
-  if(res.ok){const data=await res.json();executeAction(p.name,data,world);
-  if(data.action&&data.action!=='idle')toast(p.name+': '+data.action);}
- }catch(e){console.warn('Autonomy request failed',e);}
- finally{autonomyBusy=false;}
+// Decisions are caused by world events, never by a polling interval.
+const decisionState=new Map();
+function worldSnapshot(p,reason){
+ return {
+  location:'Selene Office',
+  trigger_event:reason,
+  entity_state:{
+   activity:p.activity,intention:p.intention||'',
+   position:{x:p.root.position.x,y:p.root.position.y,z:p.root.position.z}
+  },
+  nearby_entities:people.filter(c=>c!==p).map(c=>({
+   name:c.name,activity:c.activity,intention:c.intention||'',
+   position:{x:c.root.position.x,y:c.root.position.y,z:c.root.position.z}
+  })),
+  operator_position:{x:camera.position.x,y:camera.position.y,z:camera.position.z},
+  available_rooms:rooms.map(r=>({id:r.id,name:r.name})),
+  available_objects:objects.map(o=>({name:o.label,description:o.description})),
+  current_activity:p.activity,
+  current_intention:p.intention||''
+ };
 }
-setInterval(autonomyStep,30000);
+async function requestDecision(name,reason){
+ const p=people.find(c=>c.name===name);if(!p)return;
+ let state=decisionState.get(name);
+ if(!state){state={busy:false,pending:null};decisionState.set(name,state);}
+ if(state.busy){state.pending=reason;return;}
+ state.busy=true;
+ try{
+  const world=worldSnapshot(p,reason);
+  const res=await fetch('/api/autonomy/decide',{
+   method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({entity:p.name,world,trigger_event:reason})
+  });
+  const data=await res.json();
+  if(!res.ok)throw Error(data.error||res.status);
+  if(typeof data.intention==='string')p.intention=data.intention;
+  executeAction(p.name,data,world);
+  if(data.reply)log(p.name,data.reply);
+  if(data.action&&data.action!=='idle')toast(p.name+': '+data.action);
+  await save();
+ }catch(e){console.warn('Event-driven decision failed for '+name,e);}
+ finally{
+  state.busy=false;
+  if(state.pending){
+   const next=state.pending;state.pending=null;
+   requestDecision(name,next);
+  }
+ }
+}
 
-// Save and restore character positions.
+// Restore once, then let world events prompt each inhabitant's first decision.
 async function restore(){
  try{
-  const res=await fetch('/api/entity-state');if(!res.ok)return;
-  const data=await res.json();
-  for(const s of data.entities||[]){
-   const p=people.find(c=>c.name===s.entity);
-   if(p&&Number.isFinite(Number(s.x))&&Number.isFinite(Number(s.z))){
-    p.root.position.set(Number(s.x),ground(Number(s.x),Number(s.z)),Number(s.z));
-    p.activity=s.activity||p.activity;
+  const [stateRes,intentRes]=await Promise.all([
+   fetch('/api/entity-state'),fetch('/api/intentions')
+  ]);
+  if(stateRes.ok){
+   const data=await stateRes.json();
+   for(const s of data.entities||[]){
+    const p=people.find(c=>c.name===s.entity);
+    if(p&&Number.isFinite(Number(s.x))&&Number.isFinite(Number(s.z))){
+     p.root.position.set(Number(s.x),ground(Number(s.x),Number(s.z)),Number(s.z));
+     p.activity=s.activity||p.activity;
+    }
    }
+  }
+  if(intentRes.ok){
+   const data=await intentRes.json();
+   for(const p of people)p.intention=data.intentions?.[p.name]||'';
   }
  }catch(e){console.warn('Restore state failed',e);}
 }
@@ -519,7 +567,10 @@ async function save(){
   activity:p.activity,room_id:roomAt(p.root.position.x,p.root.position.z).id}))})});
  }catch(e){console.warn('Save state failed',e);}
 }
-restore();setInterval(save,15000);window.addEventListener('beforeunload',save);
+restore().then(()=>{
+ for(const p of people)requestDecision(p.name,'The world has loaded around you. Observe your surroundings and decide what matters to you.');
+});
+window.addEventListener('beforeunload',save);
 
 function nearestPrompt(){
  let best=null,dist=2.8;
@@ -529,10 +580,11 @@ function nearestPrompt(){
  if(d<dist){dist=d;best='E to inspect '+o.label;}}
  $('#prompt').style.display=best?'block':'none';if(best)$('#prompt').textContent=best;
 }
-const clock=new THREE.Clock();
-function animate(){
+let previousFrame=0;
+function animate(frameTime){
  requestAnimationFrame(animate);
- const dt=Math.min(clock.getDelta(),.04);
+ const dt=previousFrame?Math.min((frameTime-previousFrame)/1000,.04):0;
+ previousFrame=frameTime;
  movePlayer(dt);updatePeople(dt);
  moon.rotation.y+=dt*.12;
  const phase=(Math.sin(performance.now()*.00016)+1)/2;
