@@ -337,6 +337,11 @@ function updatePeople(dt){
      p.moving=false;p.activity='at destination';
      save();
      requestDecision(p.name,'You have arrived at your destination. Reassess your intention in light of what you found.');
+     for(const nearby of people){
+      if(nearby!==p&&Math.hypot(nearby.root.position.x-p.root.position.x,nearby.root.position.z-p.root.position.z)<8){
+       requestDecision(nearby.name,p.name+' has arrived nearby. Notice their arrival and decide whether it matters to you.');
+      }
+     }
     }
     continue;
    }
@@ -379,7 +384,7 @@ renderer.domElement.addEventListener('click',e=>{
  if(locked){
   const obj=aimed();if(obj?.userData.entity){talk(obj.userData.entity);return;}
   const hit=objects.find(o=>o.orb===obj||o.ring===obj);
-  if(hit)toast(hit.label+': '+hit.description);
+  if(hit){toast(hit.label+': '+hit.description);notifyNearby('The operator inspected '+hit.label+': '+hit.description,hit.x,hit.z);}
  }else{
   const person=pick(e.clientX,e.clientY);
   if(person)talk(person);else capture();
@@ -446,11 +451,18 @@ function pick(x,y){
  const hit=raycaster.intersectObjects(meshes,false)[0];
  return hit?.object?.userData.entity||null;
 }
+function notifyNearby(reason,x,z){
+ for(const p of people){
+  if(Math.hypot(p.root.position.x-x,p.root.position.z-z)<14){
+   requestDecision(p.name,reason);
+  }
+ }
+}
 function interactTarget(){
  const obj=aimed();if(!obj){toast('Aim at a character or object.');return;}
  if(obj.userData.entity){talk(obj.userData.entity);return;}
  const hit=objects.find(o=>o.orb===obj||o.ring===obj);
- if(hit)toast(hit.label+': '+hit.description);
+ if(hit){toast(hit.label+': '+hit.description);notifyNearby('The operator inspected '+hit.label+': '+hit.description,hit.x,hit.z);}
 }
 function talk(name){
  const p=people.find(c=>c.name===name);
