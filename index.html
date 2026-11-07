@@ -955,6 +955,14 @@ function roomAt(x,z){
 const FRONTIER_SIZE = 32;
 const frontierChunks = new Map();
 const frontierRequests = new Set();
+// Only cells whose terrain has actually been rendered count as walkable.
+const frontierSurfaceCells = new Set();
+function frontierCellKey(x,z){
+ return Math.floor(x*4)+":"+Math.floor(z*4);
+}
+function frontierSurfaceAt(x,z){
+ return frontierSurfaceCells.has(frontierCellKey(x,z));
+}
 
 const frontierMaterials = {
  meadow: new THREE.MeshStandardMaterial({
@@ -1246,7 +1254,12 @@ function renderFrontierChunk(chunk){
  const indicesPerTile=24;
 
  function grow(){
+  const previous=revealed;
   revealed=Math.min(tiles.length,revealed+3);
+  for(let i=previous;i<revealed;i++){
+   const tile=tiles[i];
+   frontierSurfaceCells.add(frontierCellKey(tile.wx+cellSize*.5,tile.wz+cellSize*.5));
+  }
   geometry.setDrawRange(0,revealed*indicesPerTile);
 
   if(revealed<tiles.length){
@@ -1372,6 +1385,10 @@ function ground(x,z){
   ));
   return northEntranceStairs.levels[index];
  }
+
+ // Ground collision uses the same continuous height function as the visible
+ // terrain mesh, and only after that surface cell has appeared.
+ if(frontierSurfaceAt(x,z)) return frontierHeightAt(x,z);
 
  return terrainY;
 }
