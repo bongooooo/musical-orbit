@@ -7402,6 +7402,53 @@ def continuity_save_record():
                 (content[:4000], now())
             )
         return jsonify({"ok": True, "saved": True, "visibility": "private"})
+
+    # Specialized records are written to their canonical structured stores.
+    if record_type == "lexicon":
+        with db() as conn:
+            conn.execute("""
+                INSERT INTO nova_lexicon
+                    (token, domain, definition, examples_json, source, confidence, updated_at)
+                VALUES (?, ?, ?, '[]', ?, 1.0, ?)
+                ON CONFLICT(token) DO UPDATE SET
+                    domain=excluded.domain, definition=excluded.definition,
+                    source=excluded.source, updated_at=excluded.updated_at
+            """, (title[:120] or "untitled", str(metadata.get("domain") or "language")[:80],
+                  content[:3000], entity, now()))
+    elif record_type == "nova_research":
+        with db() as conn:
+            conn.execute("""
+                INSERT INTO nova_research
+                    (researcher, topic, question, findings, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (entity, title[:300] or "Untitled investigation",
+                  str(metadata.get("question") or "")[:1000], content[:6000],
+                  str(metadata.get("status") or "finding")[:40], now(), now()))
+    elif record_type == "supernova_report":
+        if entity != "Supernova":
+            return jsonify({"ok": False, "error": "Supernova reports must be authored by Supernova."}), 403
+        with db() as conn:
+            goals = metadata.get("goals") if isinstance(metadata.get("goals"), list) else []
+            conn.execute("""
+                INSERT INTO supernova_reports
+                    (report_type, summary, goals_json, recommendation, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (title[:120] or "Progress review", content[:5000],
+                  _continuity_json.dumps(goals[:20], ensure_ascii=False),
+                  str(metadata.get("recommendation") or "")[:1500], now()))
+    elif record_type == "escort":
+        with db() as conn:
+            progress = metadata.get("progress") if isinstance(metadata.get("progress"), dict) else {}
+            conn.execute("""
+                INSERT INTO escort_records
+                    (fallen_entity, phase, progress_json, recommendation, operator_choice, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (str(metadata.get("fallen_entity") or "")[:120],
+                  title[:120] or "Escort update",
+                  _continuity_json.dumps(progress, ensure_ascii=False),
+                  str(metadata.get("recommendation") or "")[:1500],
+                  str(metadata.get("operator_choice") or "")[:500], now()))
+
     with db() as conn:
         conn.execute("""
             INSERT INTO continuity_records
