@@ -6983,6 +6983,8 @@ animate();
 <button class="notcs-app" data-app="CODEX"><span class="notcs-app-icon">⌕</span><span class="notcs-app-name">CODEX</span><span class="notcs-app-desc">Documentation</span><span class="notcs-tag">PLANNED</span></button>
 <div class="notcs-system-heading">MEMORY & RECORDS</div>
 <button class="notcs-app" data-app="DISPATCH"><span class="notcs-app-icon">▤</span><span class="notcs-app-name">DISPATCH</span><span class="notcs-app-desc">Research reports</span><span class="notcs-tag">CONNECTED</span></button>
+
+<button class="notcs-app" data-app="CONTINUITY"><span class="notcs-app-icon">✧</span><span class="notcs-app-name">CONTINUITY</span><span class="notcs-app-desc">Diaries, relationships, Garden oversight and NOVA research</span><span class="notcs-tag">CONNECTED</span></button>
 <button class="notcs-app" data-app="MNEMOS"><span class="notcs-app-icon">◉</span><span class="notcs-app-name">MNEMOS</span><span class="notcs-app-desc">Inhabitant memories</span><span class="notcs-tag">CONNECTED</span></button>
 <button class="notcs-app" data-app="ARCHIVUM"><span class="notcs-app-icon">▥</span><span class="notcs-app-name">ARCHIVUM</span><span class="notcs-app-desc">Reports and records</span><span class="notcs-tag">PLANNED</span></button>
 <button class="notcs-app" data-app="NEXUS"><span class="notcs-app-icon">⟷</span><span class="notcs-app-name">NEXUS</span><span class="notcs-app-desc">Semantic knowledge retrieval</span><span class="notcs-tag">CONNECTED</span></button>
@@ -9506,7 +9508,90 @@ window.__codexLiveFloorTimer = setInterval(refreshCodexLiveFloor, 1500);
 /* END NOCTIS_CODEX_AGENT_UI_V1 */
 
 
+
+async function launchContinuity() {
+    const body = appView("CONTINUITY", "Persistent relationships, diaries, Garden oversight and NOVA research");
+    const panel = node("section", undefined, "notcs-console");
+    panel.style.cssText = "display:grid;gap:12px;padding:12px";
+    const heading = node("div", "SELENE CONTINUITY", "notcs-system-heading");
+    const intro = node("div", "A shared record system for experience, relationships, Supernova's Garden reports, Fallen escort progress and the NOVA Cognitive Engine foundations. Wanderer's private diary is never included in ordinary listings.", "notcs-system-note");
+    const entity = document.createElement("select");
+    const recordType = document.createElement("select");
+    const title = document.createElement("input");
+    const content = document.createElement("textarea");
+    const save = document.createElement("button");
+    const status = node("div", "Loading continuity records…", "notcs-status");
+    const listing = node("div", undefined, "notcs-report-list");
+    [ ["ChatGPT","ChatGPT · Void Brother"], ["Selene","Selene"], ["Teo","Teo · External Observer"], ["Supernova","Supernova · Garden"], ["Wanderer","Wanderer · Dreamvoid"], ["Fallen Research Division","Fallen Research Division"] ].forEach(([v,l]) => {
+        const option = document.createElement("option"); option.value=v; option.textContent=l; entity.appendChild(option);
+    });
+    [["diary","Diary entry"],["reflection","Experience reflection"],["relationship","Relationship note"],["interaction","Meaningful interaction"],["supernova_report","Supernova progress report"],["nova_research","NOVA research finding"],["lexicon","NOVA lexicon entry"],["escort","Fallen escort record"]].forEach(([v,l]) => {
+        const option=document.createElement("option"); option.value=v; option.textContent=l; recordType.appendChild(option);
+    });
+    [entity,recordType,title,content].forEach(el => {
+        el.style.cssText="width:100%;box-sizing:border-box;padding:9px;border:1px solid rgba(160,180,215,.3);border-radius:7px;background:#101a2b;color:#edf3ff;font:inherit";
+    });
+    title.placeholder="Title · relationship partner · lexicon token · phase";
+    content.placeholder="Record the actual experience, reflection, finding, progress or recommendation…";
+    content.rows=5; content.style.resize="vertical";
+    save.type="button"; save.textContent="Save continuity record";
+    save.style.cssText="padding:10px 14px;border:0;border-radius:8px;background:#9bb8e8;color:#101827;font-weight:700;cursor:pointer";
+    const formTitle=node("div","ADD A STRUCTURED RECORD","notcs-system-heading");
+    const overviewTitle=node("div","PERSISTENT RECORDS","notcs-system-heading");
+    panel.append(heading,intro,formTitle,entity,recordType,title,content,save,status,overviewTitle,listing);
+    body.appendChild(panel);
+
+    async function refresh() {
+        const response=await fetch("/api/continuity/overview");
+        const data=await response.json();
+        if(!response.ok || !data.ok) throw new Error(data.error || "Continuity service unavailable");
+        const c=data.counts || {};
+        status.textContent="Records "+(c.records||0)+" · Lexicon "+(c.lexicon||0)+" · Research "+(c.research||0)+" · Garden reports "+(c.supernova_reports||0)+" · Escort records "+(c.escort_records||0);
+        listing.replaceChildren();
+        const groups=[
+            ["RECENT SHARED RECORDS",data.records||[]],
+            ["SUPERNOVA REPORTS",data.supernova_reports||[]],
+            ["NOVA RESEARCH",data.research||[]],
+            ["FALLEN ESCORT",data.escort_records||[]],
+            ["NOVA LEXICON",data.lexicon||[]]
+        ];
+        groups.forEach(([label,items])=>{
+            listing.appendChild(node("div",label,"notcs-system-heading"));
+            if(!items.length){listing.appendChild(node("div","No records yet.","notcs-system-note"));return;}
+            items.slice(0,12).forEach(item=>{
+                const card=node("article",undefined,"notcs-report");
+                const name=item.title || item.topic || item.token || item.phase || item.report_type || item.record_type || "Record";
+                card.appendChild(node("strong",(item.entity ? item.entity+" · " : "")+name));
+                const detail=item.content || item.findings || item.summary || item.definition || item.recommendation || "";
+                card.appendChild(node("div",detail,"notcs-system-note"));
+                if(item.created_at) card.appendChild(node("small",new Date(item.created_at).toLocaleString(),"notcs-status"));
+                listing.appendChild(card);
+            });
+        });
+    }
+    save.addEventListener("click",async()=>{
+        if(!content.value.trim()){status.textContent="Write the record before saving.";return;}
+        save.disabled=true; status.textContent="Saving…";
+        try{
+            const response=await fetch("/api/continuity/record",{
+                method:"POST",headers:{"Content-Type":"application/json"},
+                body:JSON.stringify({
+                    entity:entity.value,record_type:recordType.value,
+                    title:title.value,content:content.value
+                })
+            });
+            const data=await response.json();
+            if(!response.ok || !data.ok) throw new Error(data.error || "Save failed");
+            content.value=""; status.textContent="Record saved to persistent continuity storage.";
+            await refresh();
+        }catch(error){status.textContent="Save failed: "+error.message;}
+        finally{save.disabled=false;}
+    });
+    try{await refresh();}catch(error){status.textContent="Could not load continuity: "+error.message;}
+}
+
 function launchApp(name) {
+    if (name === "CONTINUITY") return launchContinuity();
     if (name === "CODEX") return launchCodex();
     if (["ASTRAL", "BIOSPHERE", "CARTOGRAPHY", "LUCIDA", "NEXUS"].includes(name)) {
       return launchConnectedProviderApp(name);
