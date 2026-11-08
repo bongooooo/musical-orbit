@@ -2406,6 +2406,258 @@ def noctis_query():
         }), 502
 
 
+
+
+# NOCTIS_GOOGLE_MODEL_MATRIX_V1
+# Model names are catalog aliases. NOCTIS_MODEL_<ID> environment variables
+# may override the API model ID without changing the visible registry.
+NOCTIS_MODEL_CATALOG = [
+    {"id":"gemini-3.6-flash","name":"Gemini 3.6 Flash","family":"Text-out","mode":"text","capabilities":["text_generation","reasoning"]},
+    {"id":"gemini-3.8-flash","name":"Gemini 3.8 Flash","family":"Text-out","mode":"text","capabilities":["text_generation","reasoning"],"default":True},
+    {"id":"gemini-3-flash","name":"Gemini 3 Flash","family":"Text-out","mode":"text","capabilities":["text_generation","reasoning"]},
+    {"id":"gemini-2.5-flash","name":"Gemini 2.5 Flash","family":"Text-out","mode":"text","capabilities":["text_generation","reasoning"]},
+    {"id":"gemini-2-flash","name":"Gemini 2 Flash","family":"Text-out","mode":"text","capabilities":["text_generation","reasoning"]},
+    {"id":"gemini-3.1-flash-lite","name":"Gemini 3.1 Flash Lite","family":"Text-out","mode":"text","capabilities":["text_generation","low_latency"]},
+    {"id":"gemini-2.5-flash-lite","name":"Gemini 2.5 Flash Lite","family":"Text-out","mode":"text","capabilities":["text_generation","low_latency"]},
+    {"id":"gemini-3.5-flash-lite","name":"Gemini 3.5 Flash Lite","family":"Text-out","mode":"text","capabilities":["text_generation","low_latency"]},
+    {"id":"gemini-2.5-pro","name":"Gemini 2.5 Pro","family":"Text-out","mode":"text","capabilities":["text_generation","deep_reasoning"]},
+    {"id":"gemini-3.1-pro","name":"Gemini 3.1 Pro","family":"Text-out","mode":"text","capabilities":["text_generation","deep_reasoning"]},
+    {"id":"gemini-4-argon","name":"Gemini 4 Argon","family":"Text-out","mode":"text","capabilities":["text_generation","reasoning"]},
+    {"id":"gemma-4-26b","name":"Gemma 4 26B","family":"Text-out","mode":"text","capabilities":["text_generation","open_model"]},
+    {"id":"gemma-4-31b","name":"Gemma 4 31B","family":"Text-out","mode":"text","capabilities":["text_generation","open_model"]},
+    {"id":"nano-banana","name":"Nano Banana family · variants","family":"Image / multimodal","mode":"image","capabilities":["image_generation","image_editing"]},
+    {"id":"gemini-2.5-flash-tts","name":"Gemini 2.5 Flash TTS","family":"Speech","mode":"tts","capabilities":["text_to_speech"]},
+    {"id":"gemini-3.1-flash-tts","name":"Gemini 3.1 Flash TTS","family":"Speech","mode":"tts","capabilities":["text_to_speech"]},
+    {"id":"gemini-3.8-flash-tts","name":"Gemini 3.8 Flash TTS","family":"Speech","mode":"tts","capabilities":["text_to_speech"]},
+    {"id":"gemini-3.8-flash-lite-tts","name":"Gemini 3.8 Flash Lite TTS","family":"Speech","mode":"tts","capabilities":["text_to_speech"]},
+    {"id":"lyria-3-clip","name":"Lyria 3 Clip","family":"Music","mode":"music","capabilities":["music_generation"]},
+    {"id":"lyria-3-pro","name":"Lyria 3 Pro","family":"Music","mode":"music","capabilities":["music_generation"]},
+    {"id":"gemini-omni-1.1-flash","name":"Gemini Omni 1.1 Flash","family":"Multimodal","mode":"text","capabilities":["text_generation","image_understanding","audio_understanding"]},
+    {"id":"gemini-omni-1.2-flash","name":"Gemini Omni 1.2 Flash","family":"Multimodal","mode":"text","capabilities":["text_generation","image_understanding","audio_understanding"]},
+    {"id":"antigravity","name":"Antigravity","family":"Agents","mode":"agent","capabilities":["agent_execution"]},
+    {"id":"deep-research-pro-preview","name":"Deep Research Pro Preview","family":"Agents","mode":"agent","capabilities":["deep_research"]},
+    {"id":"gemini-2.5-flash-native-audio-dialog","name":"Gemini 2.5 Flash Native Audio Dialog","family":"Live API","mode":"live","capabilities":["realtime_audio","dialog"]},
+    {"id":"gemini-3-flash-live","name":"Gemini 3 Flash Live","family":"Live API","mode":"live","capabilities":["realtime_audio","dialog"]},
+    {"id":"gemini-3.8-live","name":"Gemini 3.8 Live","family":"Live API","mode":"live","capabilities":["realtime_audio","dialog"],"default_live":True},
+    {"id":"gemini-3.8-live-extended-thinking","name":"Gemini 3.8 Live Extended Thinking","family":"Live API","mode":"live","capabilities":["realtime_audio","dialog","extended_thinking"]},
+    {"id":"gemini-3.5-live-translate","name":"Gemini 3.5 Live Translate","family":"Live API","mode":"live","capabilities":["realtime_translation"]},
+    {"id":"gemini-3.5-transcribe","name":"Gemini 3.5 Transcribe","family":"Live API","mode":"transcribe","capabilities":["transcription"]},
+    {"id":"gemini-3.5-transcribe-live","name":"Gemini 3.5 Transcribe Live","family":"Live API","mode":"transcribe","capabilities":["realtime_transcription"]},
+    {"id":"gemini-embedding-1","name":"Gemini Embedding 1","family":"Embeddings","mode":"embedding","capabilities":["embeddings"]},
+    {"id":"gemini-embedding-2","name":"Gemini Embedding 2","family":"Embeddings","mode":"embedding","capabilities":["embeddings"]},
+    {"id":"gemini-robotics-er-2-preview","name":"Gemini Robotics ER 2 Preview","family":"Spatial / robotics","mode":"text","capabilities":["spatial_reasoning","robotics_reasoning"]},
+    {"id":"maps-grounding","name":"Maps Grounding","family":"Grounding tools","mode":"tool","capabilities":["maps_grounding"]},
+    {"id":"search-grounding","name":"Search Grounding","family":"Grounding tools","mode":"tool","capabilities":["search_grounding"]},
+]
+
+
+def noctis_model_status():
+    output = []
+    for source in NOCTIS_MODEL_CATALOG:
+        item = dict(source)
+        env_name = "NOCTIS_MODEL_" + re.sub(
+            r"[^A-Z0-9]+", "_", item["id"].upper()
+        ).strip("_")
+        item["api_model"] = os.getenv(env_name, item["id"])
+        item["configured"] = bool(GEMINI_API_KEY)
+        item["environment_override"] = bool(os.getenv(env_name))
+        if item["mode"] in ("agent", "tool", "music", "live"):
+            item["status"] = "registered"
+        elif item["mode"] in ("text", "embedding", "image", "tts", "transcribe"):
+            item["status"] = "configured_not_tested" if item["configured"] else "needs_credentials"
+        else:
+            item["status"] = "registered"
+        output.append(item)
+    return output
+
+
+@app.get("/api/noctis/models")
+def noctis_models():
+    models = noctis_model_status()
+    return jsonify({
+        "ok": True,
+        "gateway": "NOCTIS GOOGLE MODEL MATRIX",
+        "model_count": len(models),
+        "configured": bool(GEMINI_API_KEY),
+        "default_text_model": os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
+        "default_live_model": os.getenv("GEMINI_LIVE_MODEL", "gemini-3.8-live"),
+        "models": models,
+    })
+
+
+@app.post("/api/noctis/model/run")
+def noctis_model_run():
+    import base64
+
+    body = request.get_json(silent=True) or {}
+    model_id = str(body.get("model") or "").strip().lower()
+    operation = str(body.get("operation") or "generate").strip().lower()
+    prompt = str(body.get("prompt") or body.get("query") or "").strip()
+    params = body.get("params") or {}
+
+    if not isinstance(params, dict):
+        return jsonify({"ok": False, "error": "params must be an object."}), 400
+
+    model_info = next(
+        (item for item in NOCTIS_MODEL_CATALOG if item["id"] == model_id),
+        None,
+    )
+    if model_info is None:
+        return jsonify({
+            "ok": False,
+            "error": "Unknown model alias.",
+            "available_models": [item["id"] for item in NOCTIS_MODEL_CATALOG],
+        }), 400
+
+    if not GEMINI_API_KEY:
+        return jsonify({
+            "ok": False,
+            "model": model_id,
+            "error": "Gemini credentials are not configured.",
+        }), 503
+
+    env_name = "NOCTIS_MODEL_" + re.sub(
+        r"[^A-Z0-9]+", "_", model_id.upper()
+    ).strip("_")
+    api_model = os.getenv(env_name, model_id)
+    mode = model_info["mode"]
+
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+
+        if operation in ("generate", "text"):
+            if mode not in ("text",):
+                return jsonify({
+                    "ok": False,
+                    "error": "This model is not registered for text generation.",
+                    "model_mode": mode,
+                }), 400
+            if not prompt:
+                return jsonify({"ok": False, "error": "Enter a prompt."}), 400
+            config = types.GenerateContentConfig(
+                system_instruction=str(params.get("system_instruction") or ""),
+                temperature=min(max(float(params.get("temperature", 0.7)), 0.0), 2.0),
+                max_output_tokens=min(max(int(params.get("max_output_tokens", 2048)), 1), 8192),
+            )
+            response = client.models.generate_content(
+                model=api_model,
+                contents=prompt,
+                config=config,
+            )
+            return jsonify({
+                "ok": True,
+                "model": model_id,
+                "api_model": api_model,
+                "operation": "generate",
+                "text": response.text or "",
+                "usage": (
+                    response.usage_metadata.model_dump()
+                    if getattr(response, "usage_metadata", None)
+                    and hasattr(response.usage_metadata, "model_dump")
+                    else None
+                ),
+            })
+
+        if operation == "embed":
+            if mode != "embedding":
+                return jsonify({"ok": False, "error": "Select an embedding model."}), 400
+            if not prompt:
+                return jsonify({"ok": False, "error": "Enter text to embed."}), 400
+            response = client.models.embed_content(
+                model=api_model,
+                contents=prompt,
+            )
+            embeddings = []
+            for item in (getattr(response, "embeddings", None) or []):
+                embeddings.append(list(getattr(item, "values", []) or []))
+            return jsonify({
+                "ok": True,
+                "model": model_id,
+                "api_model": api_model,
+                "operation": "embed",
+                "embedding_count": len(embeddings),
+                "dimensions": len(embeddings[0]) if embeddings else 0,
+                "embeddings": embeddings,
+            })
+
+        if operation == "image":
+            if mode != "image":
+                return jsonify({"ok": False, "error": "Select an image-generation model."}), 400
+            if not prompt:
+                return jsonify({"ok": False, "error": "Enter an image prompt."}), 400
+            generate_images = getattr(client.models, "generate_images", None)
+            if not callable(generate_images):
+                return jsonify({
+                    "ok": False,
+                    "error": "Image generation is not exposed by the installed Google GenAI SDK version.",
+                }), 501
+            response = generate_images(model=api_model, prompt=prompt)
+            images = []
+            for generated in (getattr(response, "generated_images", None) or []):
+                image_obj = getattr(generated, "image", None)
+                image_bytes = getattr(image_obj, "image_bytes", None)
+                if image_bytes:
+                    images.append(base64.b64encode(image_bytes).decode("ascii"))
+            return jsonify({
+                "ok": True,
+                "model": model_id,
+                "api_model": api_model,
+                "operation": "image",
+                "images_base64": images,
+                "image_count": len(images),
+            })
+
+        if operation == "transcribe":
+            if mode != "transcribe":
+                return jsonify({"ok": False, "error": "Select a transcription model."}), 400
+            encoded = str(params.get("audio_base64") or "")
+            if not encoded:
+                return jsonify({"ok": False, "error": "Provide params.audio_base64."}), 400
+            audio_bytes = base64.b64decode(encoded, validate=True)
+            mime_type = str(params.get("mime_type") or "audio/wav")
+            audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
+            response = client.models.generate_content(
+                model=api_model,
+                contents=[audio_part, prompt or "Transcribe the supplied audio accurately."],
+            )
+            return jsonify({
+                "ok": True,
+                "model": model_id,
+                "api_model": api_model,
+                "operation": "transcribe",
+                "text": response.text or "",
+            })
+
+        return jsonify({
+            "ok": False,
+            "model": model_id,
+            "model_mode": mode,
+            "error": "This model family is registered but requires its dedicated Live, music, agent, or grounding session adapter.",
+            "status": "registered",
+        }), 501
+
+    except urllib.error.HTTPError as exc:
+        app.logger.warning(
+            "NOCTIS model %s returned HTTP %s", model_id, exc.code
+        )
+        return jsonify({
+            "ok": False,
+            "model": model_id,
+            "error": "The Google model endpoint returned an HTTP error.",
+            "status_code": exc.code,
+        }), 502
+    except Exception as exc:
+        app.logger.exception("NOCTIS model request failed: %s", model_id)
+        return jsonify({
+            "ok": False,
+            "model": model_id,
+            "error": "Model request failed.",
+            "error_type": type(exc).__name__,
+        }), 502
+
+# END NOCTIS_GOOGLE_MODEL_MATRIX_V1
+
+
 # END NOCTIS_GATEWAY_V1
 
 
