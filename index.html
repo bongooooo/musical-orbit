@@ -6973,6 +6973,7 @@ animate();
       <div id="notcs-app-grid">
 <div class="notcs-system-heading">CORE KNOWLEDGE & RESEARCH</div>
 <button class="notcs-app" data-app="ORACLE"><span class="notcs-app-icon">◎</span><span class="notcs-app-name">ORACLE</span><span class="notcs-app-desc">Web research and API gateway</span><span class="notcs-tag">CONNECTED</span></button>
+<button class="notcs-app" data-app="MODEL_MATRIX"><span class="notcs-app-icon">⌘</span><span class="notcs-app-name">MODEL MATRIX</span><span class="notcs-app-desc">Google model ecosystem and capability router</span><span class="notcs-tag">CONNECTED</span></button>
 <button class="notcs-app" data-app="ASTRAL"><span class="notcs-app-icon">✧</span><span class="notcs-app-name">ASTRAL</span><span class="notcs-app-desc">NASA planetary and space imagery</span><span class="notcs-tag">CONNECTED</span></button>
 <button class="notcs-app" data-app="BIOSPHERE"><span class="notcs-app-icon">❋</span><span class="notcs-app-name">BIOSPHERE</span><span class="notcs-app-desc">Species and biodiversity research</span><span class="notcs-tag">CONNECTED</span></button>
 <button class="notcs-app" data-app="CARTOGRAPHY"><span class="notcs-app-icon">✥</span><span class="notcs-app-name">CARTOGRAPHY</span><span class="notcs-app-desc">Places and geographic intelligence</span><span class="notcs-tag">CONNECTED</span></button>
@@ -8711,6 +8712,152 @@ animate();
   }
 
 
+  async function launchModelMatrix() {
+    const body = appView(
+      "MODEL MATRIX",
+      "Google model ecosystem · unified catalogue, capability routing and live request console"
+    );
+    body.style.display = "grid";
+    body.style.gap = "12px";
+
+    const status = node("div", "Loading model catalogue…", "notcs-status");
+    const controls = node("div");
+    controls.style.cssText = "display:grid;gap:9px;padding:12px;border:1px solid rgba(155,184,232,.25);border-radius:9px;background:rgba(5,12,24,.35)";
+    const modelLabel = node("label", "MODEL / CAPABILITY");
+    const modelSelect = document.createElement("select");
+    modelSelect.style.cssText = "width:100%;padding:10px;background:#101a2b;color:#edf3ff;border:1px solid #52617a;border-radius:7px";
+    const prompt = document.createElement("textarea");
+    prompt.rows = 5;
+    prompt.placeholder = "Enter a prompt, question, or text to embed…";
+    prompt.style.cssText = "width:100%;box-sizing:border-box;padding:10px;background:#101a2b;color:#edf3ff;border:1px solid #52617a;border-radius:7px;font:inherit;resize:vertical";
+    const run = node("button", "Run model");
+    run.type = "button";
+    run.style.cssText = "padding:10px 14px;border:0;border-radius:7px;background:#9bb8e8;color:#101827;font-weight:700;cursor:pointer";
+    const hint = node("div", "Text generation and embeddings are executable through this console. Other registered model families are shown with their dedicated adapter state.", "notcs-system-note");
+    controls.append(modelLabel, modelSelect, prompt, run, hint);
+    const catalogueTitle = node("h4", "REGISTERED MODEL FAMILIES");
+    const catalogue = node("div");
+    catalogue.style.cssText = "display:grid;gap:7px";
+    const outputTitle = node("h4", "REQUEST OUTPUT");
+    const output = node("pre", "No request submitted.");
+    output.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto;padding:12px;border:1px solid rgba(155,184,232,.2);border-radius:8px;background:rgba(0,0,0,.25);color:#dce8ff;font-size:11px";
+    body.append(status, controls, catalogueTitle, catalogue, outputTitle, output);
+
+    let models = [];
+    function selectedModel() {
+      return models.find(item => item.id === modelSelect.value);
+    }
+    function updateMode() {
+      const model = selectedModel();
+      if (!model) return;
+      const descriptions = {
+        text: "Text generation · accepts prompts",
+        embedding: "Embedding · converts text into vectors",
+        image: "Image generation · dedicated image adapter",
+        tts: "Text-to-speech · dedicated audio adapter",
+        music: "Music generation · dedicated music adapter",
+        live: "Realtime Live session · dedicated session adapter",
+        transcribe: "Audio transcription · accepts audio_base64 in params",
+        agent: "Agent workflow · dedicated agent adapter",
+        tool: "Grounding tool · invoked by supported model workflows"
+      };
+      hint.textContent = (descriptions[model.mode] || model.mode) +
+        " · " + model.status.replace(/_/g, " ").toUpperCase() +
+        (model.environment_override ? " · API ID OVERRIDE ACTIVE" : "");
+      run.textContent = model.mode === "embedding" ? "Generate embedding" :
+        model.mode === "text" ? "Run text model" :
+        model.mode === "image" ? "Generate image" :
+        model.mode === "transcribe" ? "Transcribe audio" : "Open adapter status";
+    }
+    modelSelect.addEventListener("change", updateMode);
+
+    async function load() {
+      const response = await fetch("/api/noctis/models");
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Model catalogue unavailable.");
+      models = data.models || [];
+      modelSelect.replaceChildren();
+      const groups = new Map();
+      for (const model of models) {
+        if (!groups.has(model.family)) groups.set(model.family, []);
+        groups.get(model.family).push(model);
+      }
+      for (const [family, entries] of groups) {
+        const group = document.createElement("optgroup");
+        group.label = family;
+        for (const model of entries) {
+          const option = document.createElement("option");
+          option.value = model.id;
+          option.textContent = model.name + " · " + model.status.replace(/_/g, " ");
+          group.appendChild(option);
+        }
+        modelSelect.appendChild(group);
+      }
+      const defaultModel = data.default_text_model || "gemini-3.8-flash";
+      if (models.some(item => item.id === defaultModel)) modelSelect.value = defaultModel;
+      catalogue.replaceChildren();
+      for (const [family, entries] of groups) {
+        const card = node("section");
+        card.style.cssText = "padding:10px;border:1px solid rgba(155,184,232,.18);border-radius:8px;background:rgba(8,15,28,.3)";
+        card.appendChild(node("strong", family.toUpperCase() + " · " + entries.length));
+        const names = node("div", entries.map(item =>
+          item.name + " [" + item.status.replace(/_/g, " ") + "]"
+        ).join("  ·  "), "notcs-system-note");
+        names.style.marginTop = "6px";
+        card.appendChild(names);
+        catalogue.appendChild(card);
+      }
+      updateMode();
+      status.textContent = models.length + " model and capability entries loaded · " +
+        (data.configured ? "Google credentials detected" : "Google credentials not detected");
+    }
+
+    run.addEventListener("click", async () => {
+      const model = selectedModel();
+      if (!model) return;
+      const value = prompt.value.trim();
+      if (["text", "embedding", "image"].includes(model.mode) && !value) {
+        output.textContent = "Enter a prompt first.";
+        return;
+      }
+      run.disabled = true;
+      output.textContent = "Contacting NOCTIS model gateway…";
+      try {
+        const operation = model.mode === "embedding" ? "embed" :
+          model.mode === "image" ? "image" :
+          model.mode === "transcribe" ? "transcribe" : "generate";
+        const response = await fetch("/api/noctis/model/run", {
+          method: "POST",
+          headers: {"Content-Type":"application/json","Accept":"application/json"},
+          body: JSON.stringify({model:model.id,operation,prompt:value,params:{}})
+        });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) {
+          output.textContent = JSON.stringify(data, null, 2);
+          status.textContent = "REQUEST NOT COMPLETED · " + (data.status || data.error || response.status);
+          return;
+        }
+        if (data.images_base64) {
+          output.textContent = "Generated " + data.image_count + " image(s). Image data returned by backend.";
+        } else if (data.embeddings) {
+          output.textContent = "Embedding generated · " + data.dimensions +
+            " dimensions\n\n" + JSON.stringify(data.embeddings[0] || [], null, 2).slice(0, 12000);
+        } else {
+          output.textContent = data.text || JSON.stringify(data, null, 2);
+        }
+        status.textContent = "REQUEST COMPLETE · " + model.name;
+      } catch (error) {
+        output.textContent = "Gateway request failed: " + error.message;
+        status.textContent = "REQUEST FAILED";
+      } finally {
+        run.disabled = false;
+      }
+    });
+
+    try { await load(); }
+    catch (error) { status.textContent = "Model matrix unavailable: " + error.message; }
+  }
+
   async function launchConnectedProviderApp(name) {
     const configs = {
       ASTRAL: {
@@ -9592,6 +9739,7 @@ async function launchContinuity() {
 
 function launchApp(name) {
     if (name === "CONTINUITY") return launchContinuity();
+    if (name === "MODEL_MATRIX") return launchModelMatrix();
     if (name === "CODEX") return launchCodex();
     if (["ASTRAL", "BIOSPHERE", "CARTOGRAPHY", "LUCIDA", "NEXUS"].includes(name)) {
       return launchConnectedProviderApp(name);
